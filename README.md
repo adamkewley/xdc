@@ -1,4 +1,4 @@
-# xsens-dot-connector
+# xdc (XSens DOT Connector)
 
 > Use an XSens DOT from pure python code, with no external dependencies
 
