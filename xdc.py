@@ -285,7 +285,7 @@ async def scan_for_DOT_BLEDevices():
 # should be used with a relevant context manager (e.g. `with
 # DotDevice(d) as dd`) because it handles connecting and disconnecting
 # from the device
-class DotDevice:
+class Dot:
 
     def __init__(self, ble_device):
         self.dev = ble_device
@@ -336,10 +336,10 @@ class ResponseHandler:
 async def async_run():
     dots = await scan_for_DOT_BLEDevices()
     for dot in dots:
-        async with DotDevice(dot) as dd:
-            await dd.enable_measurement_action()
+        async with Dot(dot) as d:
+            await d.enable_measurement_action()
             h = ResponseHandler()
-            await dd.start_notify_medium_payload(h)
+            await d.start_notify_medium_payload(h)
             await asyncio.sleep(5.0)
 
 def run():
