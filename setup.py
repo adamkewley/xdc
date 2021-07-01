@@ -14,11 +14,11 @@ with open(os.path.join(here, "requirements.txt")) as f:
     requirements = f.read().split("\n")
 
 setuptools.setup(
-    name='xdc'
+    name='xdc',
     version=__version__,
-    description="Use an XSens DOT from pure python code, with no external dependencies"
+    description="Use an XSens DOT from pure python code, with no external dependencies",
     long_description=readme_content,
-    url="https://github.com/adamkewley/xdc"
+    url="https://github.com/adamkewley/xdc",
     license="Apache 2.0",
     classifiers=[
         'Development Status :: 4 - Beta',
