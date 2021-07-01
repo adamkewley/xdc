@@ -1,7 +1,6 @@
-import time
-import struct
-import asyncio
-from bleak import BleakScanner, BleakClient
+import struct  # for unpacking floating-point data
+import asyncio  # for async BLE IO
+from bleak import BleakScanner, BleakClient  # for BLE communication
 
 # make an XSENS UUID from an (assumed to be 4 nibbles) number
 #
@@ -214,6 +213,8 @@ class EulerAngleData:
         rv = EulerAngleData()
         rv.x = r.f32()
         rv.y = r.f32()
+
+        # seems to point orthogonally to earth's surface
         rv.z = r.f32()
 
         return rv
@@ -239,7 +240,18 @@ class FreeAccelerationData:
     def __repr__(self):
         return pretty_print(self)
 
+# data related to medium payloads
+#
+# there isn't one "universal" medium payload we can parse. The sensor
+# uses the medium payload notification to send a variety of types that
+# are all <= 40 bytes (see spec)
+class MediumPayload:
+    UUID = xuuid(0x2003)
+
 # Measurement Service: Measurement Data: Medium Payload: 'Complete (Euler)'
+#
+# a concrete instance of a medium payload. You need to check whether the
+# device is set to emit these by checking the ControlCharacteristic (above)
 class MediumPayloadCompleteEuler:
     
     def parse(b):
@@ -256,56 +268,80 @@ class MediumPayloadCompleteEuler:
     def __repr__(self):
         return pretty_print(self)
 
-characteristics = [
-    DeviceInfoCharacteristic,
-    DeviceControlCharacteristic,
-    ControlCharacteristic,
-]
-
-medium_payload_len_chr = xuuid(0x2003)
-
-async def find_dots():
-    # see: https://bleak.readthedocs.io/en/latest/scanning.html
-    devices = await BleakScanner.discover()
+# scan for all DOTs the host's bluetooth adaptor can see
+async def scan_for_DOT_BLEDevices():
+    # scanners: https://bleak.readthedocs.io/en/latest/api.html#scanning-clients
+    ble_devices = await BleakScanner.discover()
     rv = []
-    for d in devices:
-        if "xsens dot" in d.name.lower():
-            # d is BLEDevice: https://bleak.readthedocs.io/en/latest/api.html#bleak.backends.device.BLEDevice
-            rv.append(d)
+    for ble_device in ble_devices:
+        # BLEDevice: https://bleak.readthedocs.io/en/latest/api.html#class-representing-ble-devices
+        if "xsens dot" in ble_device.name.lower():
+            rv.append(ble_device)
     return rv
 
-def on_measurement_payload(sender, data):
-    parsed = MediumPayloadCompleteEuler.parse(data)
-    print(f"t={parsed.timestamp.value} x={parsed.euler.x}, y={parsed.euler.y}, z={parsed.euler.z}")
+# basic wrapper around a BLE device that is specialized for
+# the DOT
+#
+# should be used with a relevant context manager (e.g. `with
+# DotDevice(d) as dd`) because it handles connecting and disconnecting
+# from the device
+class DotDevice:
 
-# print "Device Info Characteristic" (sec 2.1, p8)
-async def print_dot_config(addr):
-    async with BleakClient(addr) as client:
-        svcs = await client.get_services()
-        for svc in svcs:
-            print(svc)
-        
-        for klass in characteristics:
-            print(klass.UUID)
-            rv = await client.read_gatt_char(klass.UUID)
-            print(len(rv))
-            print(rv)
-            print(klass.parse(rv))
+    def __init__(self, ble_device):
+        self.dev = ble_device
+        self.client = BleakClient(self.dev.address)
 
-        # enable notifications
-        cur_control_chr = ControlCharacteristic.parse(await client.read_gatt_char(ControlCharacteristic.UUID))
-        cur_control_chr.action = 1
-        await client.write_gatt_char(ControlCharacteristic.UUID, cur_control_chr.to_bytes())       
-        
+    async def __aenter__(self):
+        await self.client.__aenter__()
+        return self
 
-        await client.start_notify(medium_payload_len_chr, on_measurement_payload)
-        await asyncio.sleep(5.0)
+    async def __aexit__(self, exc_type, value, traceback):
+        await self.client.__aexit__(exc_type, value, traceback)
 
-async def print_dots():
-    dots = await find_dots()
+    async def device_info(self):
+        resp = await self.client.read_gatt_char(DeviceInfoCharacteristic.UUID)
+        return DeviceInfoCharacteristic.parse(resp)
+
+    async def enable_measurement_action(self):
+        # read current control settings
+        resp = await self.client.read_gatt_char(ControlCharacteristic.UUID)
+        parsed = ControlCharacteristic.parse(resp)
+
+        # set current control setting to "on"
+        parsed.action = 1
+
+        # re-write the control settings to bytes
+        msg = parsed.to_bytes()
+
+        # send the (now enabled) control back to the device
+        await self.client.write_gatt_char(ControlCharacteristic.UUID, msg)
+
+    # `f` should be a `callable` that receives sender (ID) + data
+    # (bytes) as args
+    async def start_notify_medium_payload(self, f):
+        await self.client.start_notify(MediumPayload.UUID, f)
+
+# a python `Callable` that is called whenever a notification is
+# received by the bluetooth backend
+class ResponseHandler:
+    def __init__(self):
+        self.i = 0
+
+    def __call__(self, sender, data):
+        self.i += 1
+
+        parsed = MediumPayloadCompleteEuler.parse(data)
+        print(f"i={self.i} t={parsed.timestamp.value} x={parsed.euler.x}, y={parsed.euler.y}, z={parsed.euler.z}")
+
+async def async_run():
+    dots = await scan_for_DOT_BLEDevices()
     for dot in dots:
-        await print_dot_config(dot.address)
+        async with DotDevice(dot) as dd:
+            await dd.enable_measurement_action()
+            h = ResponseHandler()
+            await dd.start_notify_medium_payload(h)
+            await asyncio.sleep(5.0)
 
 def run():
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(print_dots())
+    loop.run_until_complete(async_run())
