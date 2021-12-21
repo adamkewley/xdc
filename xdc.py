@@ -4,21 +4,31 @@ from bleak import BleakScanner, BleakClient  # for BLE communication
 
 # make an XSENS UUID from an (assumed to be 4 nibbles) number
 #
+# from BLE spec, sec 1.1: "Base UUID"
+#
 # e.g. 0x1000 --> 15171000-4947-11E9-8646-D663BD873D93
 def xuuid(hexnum):
-    XSENS_BASE_UUID = "1517____-4947-11E9-8646-D663BD873D93"
+    XSENS_BASE_UUID = "1517xxxx-4947-11E9-8646-D663BD873D93"
     s = hex(hexnum)[2:]
     assert len(s) == 4
-    return XSENS_BASE_UUID.replace("____", s)
+    return XSENS_BASE_UUID.replace("xxxx", s)
 
-# basic class for reading + parsing bytes according to XSens's
+# the XSens DOT provides BLE services with the following prefixes on the
+# UUID:
+#
+# 0x1000 (e.g. 15171000-4947-...): configuration service
+# 0x2000                         : measurement service
+# 0x3000                         : charging status/battery level service
+# 0x7000                         : message service
+
+# helper class for reading + parsing bytes according to XSens's
 # specification (little endian, IEE754, etc.)
 class ResponseReader:
 
     # parse arbitrary byte sequence as little-endian integer
     def b2i(b, signed=False):
         return int.from_bytes(b, "little", signed=False)
-    
+
     def __init__(self, data):
         self.pos = 0
         self.data = data
@@ -209,7 +219,7 @@ class EulerAngleData:
 
     def read(r):
         assert r.rem() >= EulerAngleData.nbytes
-        
+
         rv = EulerAngleData()
         rv.x = r.f32()
         rv.y = r.f32()
@@ -229,7 +239,7 @@ class FreeAccelerationData:
 
     def read(r):
         assert r.rem() >= FreeAccelerationData.nbytes
-        
+
         rv = FreeAccelerationData()
         rv.x = r.f32()
         rv.y = r.f32()
@@ -253,7 +263,7 @@ class MediumPayload:
 # a concrete instance of a medium payload. You need to check whether the
 # device is set to emit these by checking the ControlCharacteristic (above)
 class MediumPayloadCompleteEuler:
-    
+
     def parse(b):
         assert len(b) >= 28, f"len is {len(b)}"
         r = ResponseReader(b)
