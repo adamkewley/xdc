@@ -77,7 +77,7 @@ class DeviceInfoCharacteristic:
 
     # read charactertistic data from a byte reader
     def read(r):
-        assert r.rem() >= 28
+        assert r.rem() >= 34
 
         rv = DeviceInfoCharacteristic()
         rv.bt_identity_addr = r.raw(6)
@@ -92,6 +92,7 @@ class DeviceInfoCharacteristic:
         rv.build_second = r.u8()
         rv.softdevice_version = r.u32()
         rv.serial_number = r.u64()
+        rv.short_product_code = r.raw(6)
 
         return rv
 
@@ -114,7 +115,7 @@ class DeviceControlCharacteristic:
         assert r.rem() >= 16
 
         rv = DeviceControlCharacteristic()
-        rv.visit_index = hex(r.u8())
+        rv.visit_index = r.u8()
         rv.identifying = r.u8()
         rv.poweroff = r.u8()
         rv.timeoutx_min = r.u8()
@@ -122,7 +123,7 @@ class DeviceControlCharacteristic:
         rv.timeouty_min = r.u8()
         rv.timeouty_sec = r.u8()
         rv.device_tag_len = r.u8()
-        rv.device_tag = r.raw(rv.device_tag_len).decode("ascii")
+        rv.device_tag = r.raw(16)
         rv.output_rate = r.u16()
         rv.filter_profile_idx = r.u8()
         rv.reserved = r.raw(5)  # just in case someone's interested
@@ -133,6 +134,23 @@ class DeviceControlCharacteristic:
     def parse(b):
         r = ResponseReader(b)
         return DeviceControlCharacteristic.read(r)
+
+    # write characteristic as bytes
+    def to_bytes(self):
+        rv = bytearray()
+        rv.extend(self.visit_index.to_bytes(1, "little"))
+        rv.extend(self.identifying.to_bytes(1, "little"))
+        rv.extend(self.poweroff.to_bytes(1, "little"))
+        rv.extend(self.timeoutx_min.to_bytes(1, "little"))
+        rv.extend(self.timeoutx_sec.to_bytes(1, "little"))
+        rv.extend(self.timeouty_min.to_bytes(1, "little"))
+        rv.extend(self.timeouty_sec.to_bytes(1, "little"))
+        rv.extend(self.device_tag_len.to_bytes(1, "little"))
+        rv.extend(self.device_tag)
+        rv.extend(self.output_rate.to_bytes(2, "little"))
+        rv.extend(self.filter_profile_idx.to_bytes(1, "little"))
+        rv.extend(self.reserved)
+        return rv
 
     def __repr__(self):
         return pretty_print(self)
@@ -278,24 +296,16 @@ class MediumPayloadCompleteEuler:
     def __repr__(self):
         return pretty_print(self)
 
-# scan for all DOTs the host's bluetooth adaptor can see
-async def scan_for_DOT_BLEDevices():
-    # scanners: https://bleak.readthedocs.io/en/latest/api.html#scanning-clients
-    ble_devices = await BleakScanner.discover()
-    rv = []
-    for ble_device in ble_devices:
-        # BLEDevice: https://bleak.readthedocs.io/en/latest/api.html#class-representing-ble-devices
-        if "xsens dot" in ble_device.name.lower():
-            rv.append(ble_device)
-    return rv
-
-# basic wrapper around a BLE device that is specialized for
+# lifetime wrapper around a BLE device that is specialized for
 # the DOT
 #
-# should be used with a relevant context manager (e.g. `with
-# DotDevice(d) as dd`) because it handles connecting and disconnecting
-# from the device
+# this is what resource- and timing-sensitive code should use, because
+# it minimizes the number of (re)connections to the device. Procedural
+# (esp. synchronous) code using the helper methods (below) will run slower
+# because the API has to handle setting up and tearing down a new connection
 class Dot:
+
+    # init/enter/exit: connect/disconnect to the DOT
 
     def __init__(self, ble_device):
         self.dev = ble_device
@@ -308,9 +318,56 @@ class Dot:
     async def __aexit__(self, exc_type, value, traceback):
         await self.client.__aexit__(exc_type, value, traceback)
 
-    async def device_info(self):
+    # low-level characteristic accessors
+
+    async def device_info_read(self):
         resp = await self.client.read_gatt_char(DeviceInfoCharacteristic.UUID)
         return DeviceInfoCharacteristic.parse(resp)
+
+    async def device_control_read(self):
+        resp = await self.client.read_gatt_char(DeviceControlCharacteristic.UUID)
+        return DeviceControlCharacteristic.parse(resp)
+
+    async def device_control_write(self, device_control_characteristic):
+        msg_bytes = device_control_characteristic.to_bytes()
+        await self.client.write_gatt_char(DeviceControlCharacteristic.UUID, msg_bytes, True)
+
+    # high-level operations
+
+    async def identify(self):
+        dc = await self.device_control_read()
+        dc.visit_index = 0x01
+        dc.identifying = 0x01
+        await self.device_control_write(dc)
+
+    async def power_off(self):
+        dc = await self.device_control_read()
+        dc.visit_index = 0x02
+        dc.poweroff = dc.poweroff | 0x01
+        await self.device_control_write(dc)
+
+    async def enable_power_on_by_usb_plug_in(self):
+        dc = await self.device_control_read()
+        dc.visit_index = 0x02
+        dc.poweroff = dc.poweroff | 0x02
+        await self.device_control_write(dc)
+
+    async def disable_power_on_by_usb_plug_in(self):
+        dc = await self.device_control_read()
+        dc.visit_index = 0x02
+        dc.poweroff = dc.poweroff & ~(0x02)
+        await self.device_control_write(dc)
+
+    async def set_output_rate(self, rate):
+        assert rate in {1, 4, 10, 12, 15, 20, 30, 60, 120}
+
+        dc = await self.device_control_read()
+        dc.visit_index = 0x10
+        dc.output_rate = rate
+        await self.device_control_write(dc)
+
+    async def reset_output_rate(self):
+        await self.set_output_rate(60)  # default, according to BLE spec
 
     async def enable_measurement_action(self):
         # read current control settings
@@ -343,15 +400,175 @@ class ResponseHandler:
         parsed = MediumPayloadCompleteEuler.parse(data)
         print(f"i={self.i} t={parsed.timestamp.value} x={parsed.euler.x}, y={parsed.euler.y}, z={parsed.euler.z}")
 
-async def async_run():
-    dots = await scan_for_DOT_BLEDevices()
-    for dot in dots:
-        async with Dot(dot) as d:
-            await d.enable_measurement_action()
-            h = ResponseHandler()
-            await d.start_notify_medium_payload(h)
-            await asyncio.sleep(5.0)
+# asynchronously returns `True` if the provided `bleak.backends.device.BLEDevice`
+# is believed to be an XSens DOT sensor
+async def ais_DOT(bledevice):
+    if bledevice.name and "xsens dot" in bledevice.name:
+        # spec: 1.2: Scanning and Filtering: tag name is "Xsens DOT"
+        #
+        # other devices in the wild *may* have a name collision with this, but it's
+        # unlikely
+        return True
+    elif bledevice.metadata.get("manufacturer_data") and bledevice.metadata["manufacturer_data"].get(2182):
+        # spec: 1.2: Scanning and Filtering: Bluetooth SIG identifier for XSens Technologies B.V. is 2182 (0x0886)
+        #
+        # this ambiguously identifies an XSens DOT. XSens might recycle its bluetooth
+        # ID for other products, though, so we need to check that the device actually
+        # responds to a DOT-like packet
+        try:
+            async with Dot(bledevice) as dot:
+                await dot.device_info_read()  # typical request
+                return True
+        except asyncio.exceptions.TimeoutError as ex:
+            return False
 
-def run():
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(async_run())
+# synchronously returns `True` if the provided `bleak.backends.device.BLEDevice` is an
+# XSens DOT
+def is_DOT(bledevice):
+    return asyncio.get_event_loop().run_until_complete(ais_DOT(bledevice))
+
+# asynchronously returns a list of all (not just DOT) BLE devices that
+# the host's bluetooth adaptor can see. Each element in the list is an
+# instance of `bleak.backends.device.BLEDevice`
+async def ascan_all():
+    async with BleakScanner() as scanner:
+        return list(await scanner.discover())
+
+# synchronously returns a list of all (not just DOT) BLE devices that the
+# host's bluetooth adaptor can see. Each element in the list is an instance
+# of `bleak.backends.device.BLEDevice`
+def scan_all():
+    return asyncio.run(ascan_all_raw())
+
+# asynchronously returns a list of all XSens DOTs that the host's bluetooth
+# adaptor can see. Each element in the list is an instance of
+# `bleak.backends.device.BLEDevice`
+async def ascan():
+    return [d for d in await ascan_all() if await ais_DOT(d)]
+
+# synchronously returns a list of all XSens DOTs that the host's bluetooth
+# adaptor can see. Each element in the list is an instance of
+# `bleak.backends.device.BLEDevice`
+def scan():
+    return asyncio.run(ascan())
+
+# asynchronously returns a BLE device with the given identifier/address
+#
+# returns `None` if the device cannot be found (e.g. no connection, wrong
+# address)
+async def afind_by_address(device_identifier):
+    async with BleakScanner() as scanner:
+        return await scanner.find_device_by_address(device_identifier)
+
+# synchronously returns a BLE device with the given identifier/address
+#
+# returns `None` if the device cannot be found (e.g. no connection, wrong
+# address)
+def find_by_address(device_identifier):
+    return asyncio.run(afind_by_address(device_identifier))
+
+# asynchronously returns a BLE device with the given identifier/address if the
+# device appears to be an XSens DOT
+#
+# effectively, the same as `afind_by_address` but with the extra stipulation that
+# the given device must be a DOT
+async def afind_dot_by_address(device_identifier):
+    dev = await afind_by_address(device_identifier)
+
+    if dev is None:
+        return None  # device cannot be found
+    elif not await ais_DOT(dev):
+        return None  # device exists but is not a DOT
+    else:
+        return dev
+
+# synchronously returns a BLE device with the given identifier/address, if the device
+# appears to be an XSens DOT
+#
+# effectively, the same as `find_by_address`, but with the extra stipulation that
+# the given device must be a DOT
+def find_dot_by_address(device_identifier):
+    return asyncio.run(afind_dot_by_address(device_identifier))
+
+
+# low-level characteristic accessors (free functions)
+
+
+# asynchronously returns the "Device Info Characteristic" for the given DOT device
+#
+# see: sec 2.1 Device Info Characteristic in DOT BLE spec
+async def adevice_info_read(bledevice):
+    async with Dot(bledevice) as dot:
+        return await dot.device_info_read()
+
+# synchronously returns the "Device Info Characteristic" for the given DOT device
+#
+# see: sec 2.1: Device Info Characteristic in DOT BLE spec
+def device_info_read(bledevice):
+    return asyncio.run(adevice_info_read(bledevice))
+
+# asynchronously returns the "Device Control Characteristic" for the given DOT device
+#
+# see: sec 2.2: Device Control Characteristic in DOT BLE spec
+async def adevice_control_read(bledevice):
+    async with Dot(bledevice) as dot:
+        return await dot.device_control_read()
+
+# synchronously returns the "Device Control Characteristic" for the given DOT device
+#
+# see: sec 2.2: Device Control Characteristic in DOT BLE spec
+def device_control_read(bledevice):
+    return asyncio.run(adevice_control_read(bledevice))
+
+# asynchronously write the provided DeviceControlCharacteristic to the provided
+# DOT device
+async def adevice_control_write(bledevice, device_control_characteristic):
+    async with Dot(bledevice) as dot:
+        await dot.device_control_write(device_control_characteristic)
+
+def device_control_write(bledevice, device_control_characteristic):
+    asyncio.run(adevice_control_write(bledevice, device_control_characteristic))
+
+# high-level operations (free functions)
+
+async def aidentify(bledevice):
+    async with Dot(bledevice) as dot:
+        await dot.identify()
+
+def identify(bledevice):
+    asyncio.run(aidentify(bledevice))
+
+async def apower_off(bledevice):
+    async with Dot(bledevice) as dot:
+        await dot.power_off()
+
+def power_off(bledevice):
+    asyncio.run(apower_off(bledevice))
+
+async def aenable_power_on_by_usb_plug_in(bledevice):
+    async with Dot(bledevice) as dot:
+        await dot.enable_power_on_by_usb_plug_in()
+
+def enable_power_on_by_usb_plug_in(bledevice):
+    asyncio.run(aenable_power_on_by_usb_plug_in(bledevice))
+
+async def adisable_power_on_by_usb_plug_in(bledevice):
+    async with Dot(bledevice) as dot:
+        await dot.disable_power_on_by_usb_plug_in()
+
+def disable_power_on_by_usb_plug_in(bledevice):
+    asyncio.run(adisable_power_on_by_usb_plug_in(bledevice))
+
+async def aset_output_rate(bledevice, rate):
+    async with Dot(bledevice) as dot:
+        await dot.set_output_rate(rate)
+
+def set_output_rate(bledevice, rate):
+    asyncio.run(aset_output_rate(bledevice, rate))
+
+async def areset_output_rate(bledevice):
+    async with Dot(bledevice) as dot:
+        await dot.reset_output_rate()
+
+def reset_output_rate(bledevice):
+    asyncio.run(areset_output_rate(bledevice))
