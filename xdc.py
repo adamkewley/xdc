@@ -244,82 +244,363 @@ class ControlCharacteristic:
     def __repr__(self):
         return pretty_print(self)
 
-o.i# timestamp data, usually appears in a measurement responses
-class TimestampData:
-
-    nbytes = 4
-
-    def read(r):
-        assert r.rem() >= TimestampData.nbytes
-
-        rv = TimestampData()
-        rv.value = r.u32()
-
-        return rv
-
-    def __repr__(self):
-        return pretty_print(self)
-
-# Euler angle data, usually appears in measurement responses
-class EulerAngleData:
-
-    nbytes = 12
-
-    def read(r):
-        assert r.rem() >= EulerAngleData.nbytes
-
-        rv = EulerAngleData()
-        rv.x = r.f32()
-        rv.y = r.f32()
-
-        # seems to point orthogonally to earth's surface
-        rv.z = r.f32()
-
-        return rv
-
-    def __repr__(self):
-        return pretty_print(self)
-
-# free acceleration data, usually appears in measurement responses
-class FreeAccelerationData:
-
-    nbytes = 12
-
-    def read(r):
-        assert r.rem() >= FreeAccelerationData.nbytes
-
-        rv = FreeAccelerationData()
-        rv.x = r.f32()
-        rv.y = r.f32()
-        rv.z = r.f32()
-
-        return rv
-
-    def __repr__(self):
-        return pretty_print(self)
-
-# data related to medium payloads
+# data for long-payload measurements
 #
-# there isn't one "universal" medium payload we can parse. The sensor
-# uses the medium payload notification to send a variety of types that
-# are all <= 40 bytes (see spec)
-class MediumPayload:
+# the DOT can emit data in long (63-byte), medium (40-byte), and short (20-byte) lengths.
+# What those bytes parse out to depends on the payload mode (see "Measurement Service Control
+# Characteristic") is set to.
+class LongPayloadCharacteristic:
+    UUID = xuuid(0x2002)
+
+# data for medium-payload measurements
+#
+# the DOT can emit data in long (63-byte), medium (40-byte), and short (20-byte) lengths.
+# What those bytes parse out to depends on the payload mode (see "Measurement Service Control
+# Characteristic") is set to.
+class MediumPayloadCharacteristic:
     UUID = xuuid(0x2003)
 
-# Measurement Service: Measurement Data: Medium Payload: 'Complete (Euler)'
+# data for short-payload measurements
 #
-# a concrete instance of a medium payload. You need to check whether the
-# device is set to emit these by checking the ControlCharacteristic (above)
-class MediumPayloadCompleteEuler:
+# the DOT can emit data in long (63-byte), medium (40-byte), and short (20-byte) lengths.
+# What those bytes parse out to depends on the payload mode (see "Measurement Service Control
+# Characteristic") is set to.
+class ShortPayloadCharacteristic:
+    UUID = xuuid(0x2004)
+
+# the next bunch of classes are parsers etc. for the wide variety of measurement structs
+# that the measurement service can emit
+
+# measurement data (sec. 3.5 in BLE spec): timestamp: "Timestamp of the sensor in microseconds"
+class Timestamp:
+    size = 4
+
+    def read(reader):
+        assert reader.rem() >= Timestamp.size
+
+        rv = Timestamp()
+        rv.microseconds = reader.u32()
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+# measurement data (sec. 3.5 in BLE spec): quaternion: "The orientation expressed as a quaternion"
+class Quaternion:
+    size = 16
+
+    def read(reader):
+        assert reader.rem() >= Quaternion.size
+
+        rv = Quaternion()
+        rv.w = reader.f32()
+        rv.x = reader.f32()
+        rv.y = reader.f32()
+        rv.z = reader.f32()
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+# measurement data (sec. 3.5 in BLE spec): euler angles: "The orientation expressed as Euler angles, degree"
+class EulerAngles:
+    size = 12
+
+    def read(reader):
+        assert reader.rem() >= EulerAngles.size
+
+        rv = EulerAngles()
+        rv.x = reader.f32()
+        rv.y = reader.f32()
+        rv.z = reader.f32()
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+# measurement data (sec. 3.5 in the BLE spec): free acceleration: "Acceleration in local earth coordinate and the local gravity is deducted, m/s^2"
+class FreeAcceleration:
+    size = 12
+
+    def read(reader):
+        assert reader.rem() >= FreeAcceleration.size
+
+        rv = FreeAcceleration()
+        rv.x = reader.f32()
+        rv.y = reader.f32()
+        rv.z = reader.f32()
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+# measurement data (sec. 3.5 in BLE spec): dq: "Orientation change during a time interval"
+class Dq:
+    size = 16
+
+    def read(reader):
+        assert reader.rem() >= Dq.size
+
+        rv = Dq()
+        rv.w = reader.f32()
+        rv.x = reader.f32()
+        rv.y = reader.f32()
+        rv.z = reader.f32()
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+# measurement data (sec. 3.5 in the BLE spec): dv: "Velocity change during a time interval, m/s"
+class Dv:
+    size = 12
+
+    def read(reader):
+        assert reader.rem() >= Dv.size
+
+        rv = Dv()
+        dv.w = reader.f32()
+        dv.x = reader.f32()
+        dv.y = reader.f32()
+        dv.z = reader.f32()
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+# measurement data (sec. 3.5 in the BLE spec): Acceleration: "Calibrated acceleration in sensor coordinate, m/s^2"
+class Acceleration:
+    size = 12
+
+    def read(reader):
+        assert reader.rem() >= Acceleration.size
+
+        rv = Acceleration()
+        rv.x = reader.f32()
+        rv.y = reader.f32()
+        rv.z = reader.f32()
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+# measurement data (sec. 3.5 in the BLE spec): Angular Velocity: "Rate of turn in sensor coordinate, dps"
+class AngularVelocity:
+    size = 12
+
+    def read(reader):
+        assert reader.rem() >= AngularVelocity.size
+
+        rv = AngularVelocity()
+        rv.x = reader.f32()
+        rv.y = reader.f32()
+        rv.z = reader.f32()
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+# measurement data (sec. 3.5 in the BLE spec): Status: "See section 3.5.1 of the BLE spec"
+class Status:
+    size = 2
+
+    def read(reader):
+        assert reader.rem() >= Status.size
+
+        rv = Status()
+        rv.value = reader.u16()
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+# measurement data (sec. 3.5. in the BLE spec): ClipCountAcc: "Count of ClipAcc in status"
+class ClipCountAcc:
+    size = 1
+
+    def read(reader):
+        assert reader.rem() >= ClipCountAcc.size
+
+        rv = ClipCountAcc()
+        rv.value = reader.u8()
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+# measurement data (sec. 3.5. in the BLE spec): ClipCountGyr: "Count of ClipGyr in status"
+class ClipCountGyr:
+    size = 1
+
+    def read(reader):
+        assert reader.rem() >= ClipCountGyr.size
+
+        rv = ClipCountGyr()
+        rv.value = reader.u8()
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+class BatteryCharacteristic:
+
+    UUID = xuuid(0x3001)
 
     def parse(b):
-        assert len(b) >= 28, f"len is {len(b)}"
+        assert len(b) == 2
+
         r = ResponseReader(b)
 
+        rv = BatteryCharacteristic()
+        rv.battery_level = r.u8()
+        rv.charging_status = r.u8()
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+class MediumPayloadExtendedQuaternion:
+    size = 36
+
+    def read(reader):
+        assert reader.rem() >= MediumPayloadExtendedQuaternion.size
+
+        rv = MediumPayloadExtendedQuaternion()
+        rv.timestamp = Timestamp.read(reader)
+        rv.quaternion = Quaternion.read(reader)
+        rv.free_acceleration = FreeAcceleration.read(reader)
+        rv.status = Status.read(reader)
+        rv.clip_count_acc = ClipCountAcc.read(reader)
+        rv.clip_count_gyr = ClipCountGyr.read(reader)
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+class MediumPayloadCompleteQuaternion:
+    size = 32
+
+    def read(reader):
+        assert reader.rem() >= MediumPayloadCompleteQuaternion.size
+
+        rv = MediumPayloadCompleteQuaternion()
+        rv.timestamp = Timestamp.read(reader)
+        rv.quaternion = Quaternion.read(reader)
+        rv.free_acceleration = FreeAcceleration.read(reader)
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+class MediumPayloadExtendedEuler:
+    size = 32
+
+    def read(reader):
+        assert reader.rem() >= MediumPayloadExtendedEuler.size
+
+        rv = MediumPayloadExtendedEuler()
+        rv.timestamp = Timestamp.read(reader)
+        rv.euler = EulerAngles.read(reader)
+        rv.free_acceleration = FreeAcceleration.read(reader)
+        rv.status = Status.read(reader)
+        rv.clip_count_acc = ClipCountAcc.read(reader)
+        rv.clip_count_gyr = ClipCountGyr.read(reader)
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+class MediumPayloadCompleteEuler:
+    size = 28
+
+    def read(reader):
+        assert reader.rem() >= MediumPayloadCompleteEuler.size
+
         rv = MediumPayloadCompleteEuler()
-        rv.timestamp = TimestampData.read(r)
-        rv.euler = EulerAngleData.read(r)
-        rv.free_accel = FreeAccelerationData.read(r)
+        rv.timestamp = Timestamp.read(reader)
+        rv.euler = EulerAngles.read(reader)
+        rv.free_acceleration = FreeAcceleration.read(reader)
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+class MediumPayloadDeltaQuantities:
+    size = 32
+
+    def read(reader):
+        assert reader.rem() >= MediumPayloadDeltaQuantities.size
+
+        rv = MediumPayloadDeltaQuantities()
+        rv.timestamp = Timestamp.read()
+        rv.dq = Dq.read()
+        rv.dv = Dv.read()
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+class MediumPayloadRateQuantities:
+    size = 28
+
+    def read(reader):
+        assert reader.rem() >= MediumPayloadRateQuantities.size
+
+        rv = MediumPayloadRateQuantities()
+        rv.timestamp = Timestamp.read()
+        rv.acceleration = Acceleration.read()
+        rv.angular_velocity = AngularVelocity.read()
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+class CustomMode1:
+    size = 40
+
+    def read(reader):
+        assert reader.rem() >= CustomModel.size
+
+        rv = CustomMode1()
+        rv.timestamp = Timestamp.read()
+        rv.euler = EulerAngles.read()
+        rv.free_acceleration = FreeAcceleration.read()
+        rv.angular_velocity = AngularVelocity.read()
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+class CustomMode2:
+    size = 34
+
+    def read(reader):
+        assert reader.rem() >= CustomMode2.size
+
+        rv = CustomMode2()
+        rv.timestamp = Timestamp.read()
+        rv.euler = EulerAngles.read()
+        rv.free_acceleration = FreeAcceleration.read()
+        # todo: magnetic field
 
         return rv
 
@@ -337,119 +618,217 @@ class Dot:
 
     # init/enter/exit: connect/disconnect to the DOT
 
+    # init a new `Dot` instance
+    #
+    # initializes the underlying connection client, but does not connect to
+    # the DOT. Use `.connect`/`.disconnect`, or (better) a context manager
+    # (`with Dot(ble) as dot`), or (better again) an async context manager
+    # (`async with Dot(ble) as dot`) to setup/teardown the connection
     def __init__(self, ble_device):
         self.dev = ble_device
         self.client = BleakClient(self.dev.address)
 
+    # called when entering `async with` blocks
     async def __aenter__(self):
         await self.client.__aenter__()
         return self
 
+    # called when exiting `async with` blocks
     async def __aexit__(self, exc_type, value, traceback):
         await self.client.__aexit__(exc_type, value, traceback)
 
+    # called when entering (synchronous) `with` blocks
     def __enter__(self):
         asyncio.get_event_loop().run_until_complete(self.__aenter__())
         return self
 
+    # called when exiting (synchronous) `with` blocks
     def __exit__(self, exc_type, value, traceback):
         asyncio.get_event_loop().run_until_complete(self.__aexit__(exc_type, value, traceback))
 
     # manual connection management (handy for manual use in a terminal or something)
 
+    # asynchronously establishes a connection to the DOT
     async def aconnect(self):
         return await self.client.connect()
 
+    # synchronously establishes a connection to the DOT
     def connect(self):
         return asyncio.get_event_loop().run_until_complete(self.aconnect())
 
+    # asynchronously terminates the connection to the DOT
     async def adisconnect(self):
         return await self.client.disconnect()
 
+    # synchronously terminates the connection to the DOT
     def disconnect(self):
         return asyncio.get_event_loop().run_until_complete(self.adisconnect())
 
     # low-level characteristic accessors
 
+    # asynchronously reads the "Device Info Characteristic" (sec. 2.1 in the BLE spec)
     async def adevice_info_read(self):
         resp = await self.client.read_gatt_char(DeviceInfoCharacteristic.UUID)
         return DeviceInfoCharacteristic.parse(resp)
 
+    # synchronously reads the "Device Info Characteristic" (sec. 2.1 in the BLE spec)
     def device_info_read(self):
         return asyncio.get_event_loop().run_until_complete(self.adevice_info_read())
 
+    # asynchronously reads the "Device Control Characteristic" (sec. 2.2. in the BLE spec)
     async def adevice_control_read(self):
         resp = await self.client.read_gatt_char(DeviceControlCharacteristic.UUID)
         return DeviceControlCharacteristic.parse(resp)
 
+    # synchronously reads the "Device Control Characteristic" (sec. 2.2. in the BLE spec)
     def device_control_read(self):
         return asyncio.get_event_loop().run_until_complete(self.adevice_control_read())
 
+    # asynchronously writes the "Device Control Characteristic" (sec. 2.2. in the BLE spec)
+    #
+    # arg must be a `DeviceControlCharacteristic` with its fields set to appropriate
+    # values (read the BLE spec to see which values are supported)
     async def adevice_control_write(self, device_control_characteristic):
         msg_bytes = device_control_characteristic.to_bytes()
         await self.client.write_gatt_char(DeviceControlCharacteristic.UUID, msg_bytes, True)
 
+    # synchronously writes the "Device Control Characteristic" (sec. 2.2. in the BLE spec)
+    #
+    # arg must be a `DeviceControlCharacteristic` with its fields set to appropriate
+    # values (read the BLE spec to see which values are supported)
     def device_control_write(self, device_control_characteristic):
         asyncio.get_event_loop().run_until_complete(self.adevice_control_write(device_control_characteristic))
 
+    # asynchronously enable notifications from the "Device Report Characteristic" (sec.
+    # 2.3 in the BLE spec)
+    #
+    # once notifications are enabled, `callback` will be called with two arguments:
+    # a message ID and the raw message bytes (which can be parsed using
+    # `DeviceReportCharacteristic.parse`). Notifications arrive from the DOT whenever
+    # a significant event happens (e.g. a button press). See the BLE spec for which
+    # events trigger from which actions.
     async def adevice_report_start_notify(self, callback):
         await self.client.start_notify(DeviceReportCharacteristic.UUID, callback)
 
+    # synchronously enable notifications from the "Device Report Characteristic" (sec.
+    # 2.3 in the BLE spec)
+    #
+    # once notifications are enabled, `callback` will be called with two arguments:
+    # a message ID and the raw message bytes (which can be parsed using
+    # `DeviceReportCharacteristic.parse`). Notifications arrive from the DOT whenever
+    # a significant event happens (e.g. a button press). See the BLE spec for which
+    # events trigger from which actions.
     def device_report_start_notify(self, callback):
         asyncio.get_event_loop().run_until_complete(self.adevice_report_start_notify(callback))
 
+    # asynchronously disable notifications from the "Device Report Characteristic" (sec.
+    # 2.3 in the BLE spec)
+    #
+    # this disables notifications that were enabled by the `device_report_start_notify`
+    # method. After this action completes, the `callback` in the enable call will no longer
+    # be called
     async def adevice_report_stop_notify(self):
         await self.client.stop_notify(DeviceReportCharacteristic.UUID)
 
+    # synchronously disable notifications from the "Device Report Characteristic" (sec.
+    # 2.3 in the BLE spec)
+    #
+    # this disables notifications that were enabled by the `device_report_start_notify`
+    # method. After this action completes, the `callback` in the enable call will no longer
+    # be called
     def device_report_stop_notify(self):
         asyncio.get_event_loop().run_until_complete(self.adevice_report_stop_notify())
 
+    # asynchronously read the "Control Characteristic" (sec. 3.1 in the BLE spec)
     async def acontrol_read(self):
         resp = await self.client.read_gatt_char(ControlCharacteristic.UUID)
         return ControlCharacteristic.parse(resp)
 
+    # asynchronously read the "Control Characteristic" (sec. 3.1 in the BLE spec)
     def control_read(self):
         return asyncio.get_event_loop().run_until_complete(self.acontrol_read())
-    
+
+    async def along_payload_start_notify(self, callback):
+        pass
+
+    # asynchronously read the "Battery Characteristic" (sec. 4.1 in the BLE spec)
+    async def abattery_read(self):
+        resp = await self.client.read_gatt_char(BatteryCharacteristic.UUID)
+        return BatteryCharacteristic.parse(resp)
+
+    # synchronously read the "Battery Characteristic" (sec. 4.1 in the BLE spec)
+    def battery_read(self):
+        return asyncio.get_event_loop().run_until_complete(self.abattery_read())
+
+    # asynchronously enable battery notifications from the "Battery Characteristic" (see
+    # sec. 4.1 in the BLE spec)
+    async def abattery_start_notify(self, callback):
+        await self.client.start_notify(BatteryCharacteristic.UUID, callback)
+
+    # synchronously enable battery notifications from the "Battery Characteristic" (see
+    # sec. 4.1 in the BLE spec)
+    def battery_start_notify(self, callback):
+        asyncio.get_event_loop().run_until_complete(self.abattery_start_notify(callback))
 
     # high-level operations
 
+    # asynchronously requests that the DOT identifies itself
+    #
+    # (from BLE spec sec. 2.2.): The sensor LED will fast blink 8 times and then
+    # a short pause in red, lasting for 10 seconds.
     async def aidentify(self):
         dc = await self.adevice_control_read()
         dc.visit_index = 0x01
         dc.identifying = 0x01
         await self.adevice_control_write(dc)
 
+    # synchronously requests that the DOT identifies itself
+    #
+    # (from BLE spec sec. 2.2.): The sensor LED will fast blink 8 times and then
+    # a short pause in red, lasting for 10 seconds.
     def identify(self):
         asyncio.get_event_loop().run_until_complete(self.aidentify())
 
+    # asynchronously requests that the DOT powers itself off
     async def apower_off(self):
         dc = await self.adevice_control_read()
         dc.visit_index = 0x02
         dc.poweroff = dc.poweroff | 0x01
         await self.adevice_control_write(dc)
 
+    # synchronously requests that the DOT powers itself off
     def power_off(self):
         asyncio.get_event_loop().run_until_complete(self.apower_off())
 
+    # asynchronosly requests that the DOT should power itself on when plugged into
+    # a USB (e.g. when charging)
     async def aenable_power_on_by_usb_plug_in(self):
         dc = await self.adevice_control_read()
         dc.visit_index = 0x02
         dc.poweroff = dc.poweroff | 0x02
         await self.adevice_control_write(dc)
 
+    # synchronosly requests that the DOT should power itself on when plugged into
+    # a USB (e.g. when charging)
     def enable_power_on_by_usb_plug_in(self):
         asyncio.get_event_loop().run_until_complete(self.aenable_power_on_by_usb_plug_in())
 
+    # asynchronously requests that the DOT shouldn't power itself on when plugged into
+    # a USB (e.g. when charging)
     async def adisable_power_on_by_usb_plug_in(self):
         dc = await self.adevice_control_read()
         dc.visit_index = 0x02
         dc.poweroff = dc.poweroff & ~(0x02)
         await self.adevice_control_write(dc)
 
+    # synchronously requests that the DOT shouldn't power itself on when plugged into
+    # a USB (e.g. when charging)
     def disable_power_on_by_usb_plug_in(self):
         asyncio.get_event_loop().run_until_complete(self.adisable_power_on_by_usb_plug_in())
 
+    # asynchronously sets the output rate of the DOT
+    #
+    # (BLE spec sec. 2.2): only values 1,4,10,12,15,20,30,60,120hz are permitted
     async def aset_output_rate(self, rate):
         assert rate in {1, 4, 10, 12, 15, 20, 30, 60, 120}
 
@@ -458,18 +837,24 @@ class Dot:
         dc.output_rate = rate
         await self.adevice_control_write(dc)
 
+    # synchronously sets the output rate of the DOT
+    #
+    # (BLE spec sec. 2.2): only values 1,4,10,12,15,20,30,60,120hz are permitted
     def set_output_rate(self, rate):
         asyncio.get_event_loop().run_until_complete(self.aset_output_rate(rate))
 
+    # asynchronously resets the output rate of the DOT to its default value (60 hz)
     async def areset_output_rate(self):
         await self.aset_output_rate(60)  # default, according to BLE spec
 
+    # synchronously resets the output rate of the DOT to its default value (60 hz)
     def reset_output_rate(self):
         asyncio.get_event_loop().run_until_complete(self.areset_output_rate())
 
-    # sets the "Filter Profile Index" field in the Device Control Characteristic
+    # asynchronously sets the "Filter Profile Index" field in the Device Control Characteristic
     #
-    # this sets how the DOT filters measurements?
+    # this sets how the DOT filters measurements? No idea. See sec. 2.2 in the BLE
+    # spec for a slightly better explanation
     async def aset_filter_profile_index(self, idx):
         assert idx in {0, 1}
 
@@ -478,18 +863,38 @@ class Dot:
         dc.filter_profile_index = idx
         await self.adevice_control_write(dc)
 
+    # synchronously sets the "Filter Profile Index" field in the Device Control Characteristic
+    #
+    # this sets how the DOT filters measurements? No idea. See sec. 2.2 in the BLE
+    # spec for a slightly better explanation
     def set_filter_profile_index(self, idx):
         asyncio.get_event_loop().run_until_complete(self.aset_filter_profile_index(idx))
 
+    # asynchronously sets the "Filter Profile Index" of the DOT to "General"
+    #
+    # (from BLE spec sec. 2.2., table 8): "General" is the "Default for general human
+    # motions"
     async def aset_filter_profile_to_general(self):
         await self.aset_filter_profile_index(0)
 
+    # synchronously sets the "Filter Profile Index" of the DOT to "General"
+    #
+    # (from BLE spec sec. 2.2., table 8): "General" is the "Default for general human
+    # motions"
     def set_filter_profile_to_general(self):
         asyncio.get_event_loop().run_until_complete(self.aset_filter_profile_to_general())
 
+    # asynchronously sets the "Filter Profile Index" of the DOT to "Dynamic"
+    #
+    # (from BLE spec. sec. 2.2., table 8): "Dynamic" is "For fast and jerky human motions
+    # like sprinting"
     async def aset_filter_profile_to_dynamic(self):
         await self.aset_filter_profile_index(1)
 
+    # synchronously sets the "Filter Profile Index" of the DOT to "Dynamic"
+    #
+    # (from BLE spec. sec. 2.2., table 8): "Dynamic" is "For fast and jerky human motions
+    # like sprinting"
     def set_filter_profile_to_dynamic(self):
         asyncio.get_event_loop().run_until_complete(self.aset_filter_profile_to_dynamic())
 
