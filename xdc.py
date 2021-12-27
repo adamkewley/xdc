@@ -2,6 +2,12 @@ import struct  # for unpacking floating-point data
 import asyncio  # for async BLE IO
 from bleak import BleakScanner, BleakClient  # for BLE communication
 
+# helper that pretty-prints an arbitrary class
+#
+# handy for printing the characteristic data types, etc.
+def pretty_print(obj):
+    return f"{obj.__class__.__name__}({', '.join('%s=%s' % item for item in vars(obj).items())})"
+
 # make an XSENS UUID from an (assumed to be 4 nibbles) number
 #
 # from BLE spec, sec 1.1: "Base UUID"
@@ -63,16 +69,8 @@ class ResponseReader:
     def f32(self):
         return struct.unpack('f', self.raw(4))
 
-# helper that pretty-prints an arbitrary class
-#
-# handy for printing the characteristic data types, etc.
-def pretty_print(obj):
-    return f"{obj.__class__.__name__}({', '.join('%s=%s' % item for item in vars(obj).items())})"
-
-# Device Info Characteristic (sec 2.1, p8)
+# Device Info Characteristic (sec 2.1, p8 in the BLE spec)
 class DeviceInfoCharacteristic:
-
-    # UUID string
     UUID = xuuid(0x1001)
 
     # read charactertistic data from a byte reader
@@ -80,7 +78,7 @@ class DeviceInfoCharacteristic:
         assert r.rem() >= 34
 
         rv = DeviceInfoCharacteristic()
-        rv.bt_identity_addr = r.raw(6)
+        rv.address = r.raw(6)
         rv.version_major = r.u8()
         rv.version_minor = r.u8()
         rv.version_revision = r.u8()
@@ -104,10 +102,8 @@ class DeviceInfoCharacteristic:
     def __repr__(self):
         return pretty_print(self)
 
-# Device Control Characteristic (sec 2.2, p9)
+# Device Control Characteristic (sec 2.2, p9 in the BLE spec)
 class DeviceControlCharacteristic:
-
-    # UUID string
     UUID = xuuid(0x1002)
 
     # read characteristic data from a byte reader
@@ -138,31 +134,28 @@ class DeviceControlCharacteristic:
     # write characteristic as bytes
     def to_bytes(self):
         rv = bytearray()
-        rv.extend(self.visit_index.to_bytes(1, "little"))
-        rv.extend(self.identifying.to_bytes(1, "little"))
-        rv.extend(self.poweroff.to_bytes(1, "little"))
-        rv.extend(self.timeoutx_min.to_bytes(1, "little"))
-        rv.extend(self.timeoutx_sec.to_bytes(1, "little"))
-        rv.extend(self.timeouty_min.to_bytes(1, "little"))
-        rv.extend(self.timeouty_sec.to_bytes(1, "little"))
-        rv.extend(self.device_tag_len.to_bytes(1, "little"))
-        rv.extend(self.device_tag)
-        rv.extend(self.output_rate.to_bytes(2, "little"))
-        rv.extend(self.filter_profile_idx.to_bytes(1, "little"))
-        rv.extend(self.reserved)
+        rv += self.visit_index.to_bytes(1, "little")
+        rv += self.identifying.to_bytes(1, "little")
+        rv += self.poweroff.to_bytes(1, "little")
+        rv += self.timeoutx_min.to_bytes(1, "little")
+        rv += self.timeoutx_sec.to_bytes(1, "little")
+        rv += self.timeouty_min.to_bytes(1, "little")
+        rv += self.timeouty_sec.to_bytes(1, "little")
+        rv += self.device_tag_len.to_bytes(1, "little")
+        rv += self.device_tag
+        rv += self.output_rate.to_bytes(2, "little")
+        rv += self.filter_profile_idx.to_bytes(1, "little")
+        rv += self.reserved
         return rv
 
     def __repr__(self):
         return pretty_print(self)
 
-# Device Report Characteristic (sec 2.3, p 10)
-#
-# these are emitted as notifications from the DOT to the host whenever a
-# significant event (e.g. button press) happens
+# Device Report Characteristic (sec 2.3, p10 in the BLE spec)
 class DeviceReportCharacteristic:
-
     UUID = xuuid(0x1004)
 
+    # read characteristic data from a byte reader
     def read(r):
         assert r.rem() == 36
 
@@ -178,6 +171,7 @@ class DeviceReportCharacteristic:
 
         return rv
 
+    # parse bytes as characteristic data
     def parse(b):
         r = ResponseReader(b)
         return DeviceReportCharacteristic.read(r)
@@ -185,10 +179,8 @@ class DeviceReportCharacteristic:
     def __repr__(self):
         return pretty_print(self)
 
-# Measurement Service: Control (sec 3.1, p12)
+# Measurement Service: Control (sec 3.1, p12 in the BLE spec)
 class ControlCharacteristic:
-
-    # UUID string
     UUID = xuuid(0x2001)
 
     # convert payload mode (an int) into human-readable representation
@@ -224,6 +216,7 @@ class ControlCharacteristic:
 
         return rv
 
+    # parse bytes as characteristic data
     def parse(b):
         r = ResponseReader(b)
         return ControlCharacteristic.read(r)
@@ -364,7 +357,6 @@ class Dv:
         assert reader.rem() >= Dv.size
 
         rv = Dv()
-        dv.w = reader.f32()
         dv.x = reader.f32()
         dv.y = reader.f32()
         dv.z = reader.f32()
@@ -402,6 +394,23 @@ class AngularVelocity:
         rv.x = reader.f32()
         rv.y = reader.f32()
         rv.z = reader.f32()
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+# measurement data (sec. 3.5 in the BLE spec): Magnetic Field: "Magnetic field in the sensor coordinate, a.u."
+class MagneticField:
+    size = 6
+
+    def read(reader):
+        assert reader.rem() >= MagneticField.size
+
+        rv = MagneticField()
+        rv.x = reader.raw(2)
+        rv.y = reader.raw(2)
+        rv.z = reader.raw(2)
 
         return rv
 
@@ -453,23 +462,10 @@ class ClipCountGyr:
     def __repr__(self):
         return pretty_print(self)
 
-class BatteryCharacteristic:
+class LongPayloadCustomMode4:
+    size = 51
 
-    UUID = xuuid(0x3001)
-
-    def parse(b):
-        assert len(b) == 2
-
-        r = ResponseReader(b)
-
-        rv = BatteryCharacteristic()
-        rv.battery_level = r.u8()
-        rv.charging_status = r.u8()
-
-        return rv
-
-    def __repr__(self):
-        return pretty_print(self)
+    # no parser: it's not officially supported by XSens
 
 class MediumPayloadExtendedQuaternion:
     size = 36
@@ -541,6 +537,30 @@ class MediumPayloadCompleteEuler:
     def __repr__(self):
         return pretty_print(self)
 
+class MediumPayloadHighFidelityWithMag:
+    size = 35
+
+    # no parser: XSens claims you need to use the SDK to get this
+
+class MediumPayloadHighFidelity:
+    size = 29
+
+    # no parser: XSens claims you need to use the SDK to get this
+
+class MediumPayloadDeltaQuantitiesWithMag:
+    size = 38
+
+    def read(reader):
+        assert reader.rem() >= MediumPayloadDataQuantitiesWithMag.size
+
+        rv = MediumPayloadDeltaQuantitiesWithMag()
+        rv.timestamp = Timestamp.read(reader)
+        rv.dq = Dq.read(reader)
+        rv.dv = Dv.read(reader)
+        rv.magnetic_field = MagneticField.read(reader)
+
+        return rv
+
 class MediumPayloadDeltaQuantities:
     size = 32
 
@@ -548,11 +568,26 @@ class MediumPayloadDeltaQuantities:
         assert reader.rem() >= MediumPayloadDeltaQuantities.size
 
         rv = MediumPayloadDeltaQuantities()
-        rv.timestamp = Timestamp.read()
-        rv.dq = Dq.read()
-        rv.dv = Dv.read()
+        rv.timestamp = Timestamp.read(reader)
+        rv.dq = Dq.read(reader)
+        rv.dv = Dv.read(reader)
 
         return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+class MediumPayloadRateQuantitiesWithMag:
+    size = 34
+
+    def read(reader):
+        assert reader.rem() >= MediumPayloadRateQuantitiesWithMag.size
+
+        rv = MediumPayloadRateQuantitiesWithMag()
+        rv.timestamp = Timestamp.read(reader)
+        rv.acceleration = Acceleration.read(reader)
+        rv.angular_velocity = AngularVelocity.read(reader)
+        rv.magnetic_field = MagneticField.read(reader)
 
     def __repr__(self):
         return pretty_print(self)
@@ -564,43 +599,122 @@ class MediumPayloadRateQuantities:
         assert reader.rem() >= MediumPayloadRateQuantities.size
 
         rv = MediumPayloadRateQuantities()
-        rv.timestamp = Timestamp.read()
-        rv.acceleration = Acceleration.read()
-        rv.angular_velocity = AngularVelocity.read()
+        rv.timestamp = Timestamp.read(reader)
+        rv.acceleration = Acceleration.read(reader)
+        rv.angular_velocity = AngularVelocity.read(reader)
 
         return rv
 
     def __repr__(self):
         return pretty_print(self)
 
-class CustomMode1:
+class MediumPayloadCustomMode1:
     size = 40
 
     def read(reader):
-        assert reader.rem() >= CustomModel.size
+        assert reader.rem() >= MediumPayloadCustomMode1.size
 
-        rv = CustomMode1()
-        rv.timestamp = Timestamp.read()
-        rv.euler = EulerAngles.read()
-        rv.free_acceleration = FreeAcceleration.read()
-        rv.angular_velocity = AngularVelocity.read()
+        rv = MediumPayloadCustomMode1()
+        rv.timestamp = Timestamp.read(reader)
+        rv.euler = EulerAngles.read(reader)
+        rv.free_acceleration = FreeAcceleration.read(reader)
+        rv.angular_velocity = AngularVelocity.read(reader)
 
         return rv
 
     def __repr__(self):
         return pretty_print(self)
 
-class CustomMode2:
+class MediumPayloadCustomMode2:
     size = 34
 
     def read(reader):
-        assert reader.rem() >= CustomMode2.size
+        assert reader.rem() >= MediumPayloadCustomMode2.size
 
-        rv = CustomMode2()
-        rv.timestamp = Timestamp.read()
-        rv.euler = EulerAngles.read()
-        rv.free_acceleration = FreeAcceleration.read()
-        # todo: magnetic field
+        rv = MediumPayloadCustomMode2()
+        rv.timestamp = Timestamp.read(reader)
+        rv.euler = EulerAngles.read(reader)
+        rv.free_acceleration = FreeAcceleration.read(reader)
+        rv.magnetic_field = MagneticField.read(reader)
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+class MediumPayloadCustomMode3:
+    size = 32
+
+    def read(reader):
+        assert reader.rem() >= MediumPayloadCustomMode3.size
+
+        rv = MediumPayloadCustomMode3()
+        rv.timestamp = Timestamp.read(reader)
+        rv.quaternion = Quaternion.read(reader)
+        rv.angular_velocity = AngularVelocity.read(reader)
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+class ShortPayloadOrientationEuler:
+    size = 16
+
+    def read(reader):
+        assert reader.rem() >= ShortPayloadOrientationEuler.size
+
+        rv = ShortPayloadOrientationEuler()
+        rv.timestamp = Timestamp.read(reader)
+        rv.euler = EulerAngles.read(reader)
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+class ShortPayloadOrientationQuaternion:
+    size = 20
+
+    def read(reader):
+        assert reader.rem() >= ShortPayloadOrientationQuaternion.size
+
+        rv = ShortPayloadOrientationQuaternion()
+        rv.timestamp = Timestamp.read(reader)
+        rv.quaternion = Quaternion.read(reader)
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+class ShortPayloadFreeAcceleration:
+    size = 16
+
+    def read(reader):
+        assert reader.rem() >= ShortPayloadFreeAcceleration.size
+
+        rv = ShortPayloadFreeAcceleration()
+        rv.timestamp = Timestamp.read(reader)
+        rv.free_acceleration = FreeAcceleration.read(reader)
+
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+class BatteryCharacteristic:
+
+    UUID = xuuid(0x3001)
+
+    def parse(b):
+        assert len(b) == 2
+
+        r = ResponseReader(b)
+
+        rv = BatteryCharacteristic()
+        rv.battery_level = r.u8()
+        rv.charging_status = r.u8()
 
         return rv
 
@@ -748,8 +862,48 @@ class Dot:
     def control_read(self):
         return asyncio.get_event_loop().run_until_complete(self.acontrol_read())
 
+    async def acontrol_write(self, control_characteristic):
+        msg_bytes = control_characteristic.to_bytes()
+        await self.client.write_gatt_char(ControlCharacteristic.UUID, msg_bytes)
+
+    def control_write(self, control_characteristic):
+        asyncio.get_event_loop().run_until_complete(self.acontrol_write(control_characteristic))
+
     async def along_payload_start_notify(self, callback):
-        pass
+        await self.client.start_notify(LongPayloadCharacteristic.UUID, callback)
+
+    def long_payload_start_notify(self, callback):
+        asyncio.get_event_loop().run_until_complete(self.along_payload_start_notify(callback))
+
+    async def along_payload_stop_notify(self):
+        await self.client.stop_notify(LongPayloadCharacteristic.UUID)
+
+    def long_payload_stop_notify(self):
+        asyncio.get_event_loop().run_until_complete(self.along_payload_stop_notify())
+
+    async def amedium_payload_start_notify(self, callback):
+        await self.client.start_notify(MediumPayloadCharacteristic.UUID, callback)
+
+    def medium_payload_start_notify(self, callback):
+        asyncio.get_event_loop().run_until_complete(self.amedium_payload_start_notify(callback))
+
+    async def amedium_payload_stop_notify(self):
+        await self.client.stop_notify(MediumPayloadCharacteristic.UUID)
+
+    def medium_payload_stop_notify(self):
+        asyncio.get_event_loop().run_until_complete(self.amedium_payload_stop_notify())
+
+    async def ashort_payload_start_notify(self, callback):
+        await self.client.start_notify(ShortPayloadCharacteristic.UUID, callback)
+
+    def short_payload_start_notify(self, callback):
+        asyncio.get_event_loop().run_until_complete(self.ashort_payload_start_notify(callback))
+
+    async def ashort_payload_stop_notify(self):
+        await self.client.stop_notify(ShortPayloadCharacteristic.UUID)
+
+    def short_payload_stop_notify(self):
+        asyncio.get_event_loop().run_until_complete(self.ashort_payload_stop_notify())
 
     # asynchronously read the "Battery Characteristic" (sec. 4.1 in the BLE spec)
     async def abattery_read(self):
@@ -897,25 +1051,6 @@ class Dot:
     # like sprinting"
     def set_filter_profile_to_dynamic(self):
         asyncio.get_event_loop().run_until_complete(self.aset_filter_profile_to_dynamic())
-
-    async def enable_measurement_action(self):
-        # read current control settings
-        resp = await self.client.read_gatt_char(ControlCharacteristic.UUID)
-        parsed = ControlCharacteristic.parse(resp)
-
-        # set current control setting to "on"
-        parsed.action = 1
-
-        # re-write the control settings to bytes
-        msg = parsed.to_bytes()
-
-        # send the (now enabled) control back to the device
-        await self.client.write_gatt_char(ControlCharacteristic.UUID, msg)
-
-    # `f` should be a `callable` that receives sender (ID) + data
-    # (bytes) as args
-    async def start_notify_medium_payload(self, f):
-        await self.client.start_notify(MediumPayload.UUID, f)
 
 # a python `Callable` that is called whenever a notification is
 # received by the bluetooth backend
@@ -1108,3 +1243,6 @@ async def aset_filter_profile_index(bledevice, idx):
 
 def set_filter_profile_index(bledevice, idx):
     asyncio.get_event_loop().run_until_complete(aset_filter_profile_index(bledevice, idx))
+
+def pump():
+    asyncio.get_event_loop().run_forever()
