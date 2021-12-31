@@ -703,6 +703,51 @@ class ShortPayloadFreeAcceleration:
     def __repr__(self):
         return pretty_print(self)
 
+class OrientationResetControlCharacteristic:
+    UUID = xuuid(0x2006)
+    size = 2
+
+    def read(reader):
+        assert reader.rem() >= OrientationResetCharacteristic.size
+
+        rv = OrientationResetCharacteristic()
+        rv.Type = reader.u16()
+
+        return rv
+
+    def parse(b):
+        reader = ResponseReader(b)
+        return OrientationResetCharacteristic.read(reader)
+
+    def to_bytes(self):
+        rv = bytearray()
+        rv += self.Type.to_bytes(2, "little")
+        return rv
+
+    def __repr__(self):
+        return pretty_print(self)
+
+class OrientationResetStatusCharacteristic:
+    UUID = xuuid(0x2007)
+    size = 1
+
+    def read(reader):
+        assert reader.rem() >= OrientationResetStatusCharacteristic.size
+
+        rv = OrientationResetStatusCharacteristic()
+        rv.reset_result = reader.u8()
+
+        return rv
+
+    def parse(b):
+        reader = ResponseReader(b)
+        return OrientationResetStatusCharacteristic.read(reader)
+
+    def __repr__(self):
+        return pretty_print(self)
+
+# OrientationResetDataCharacteristic: not for public use
+
 class BatteryCharacteristic:
 
     UUID = xuuid(0x3001)
