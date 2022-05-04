@@ -1226,7 +1226,7 @@ async def ascan_all():
 # host's bluetooth adaptor can see. Each element in the list is an instance
 # of `bleak.backends.device.BLEDevice`
 def scan_all():
-    return asyncio.get_event_loop().run_until_complete(ascan_all_raw())
+    return asyncio.get_event_loop().run_until_complete(ascan_all())
 
 # asynchronously returns a list of all XSens DOTs that the host's bluetooth
 # adaptor can see. Each element in the list is an instance of
