@@ -156,7 +156,7 @@ with xdc.Dot(dot) as device:
     # this is required, because the main thread is responsible for pumping the
     # message queue that contains the above notifications. If you don't pump
     # the queue then you won't see the notifications
-    xdc.pump_forever()
+    xdc.pump()
 
 
 ## ASYNCHRONOUS API (this is actually how communication with the `bleak` backend actually works)
