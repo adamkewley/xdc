@@ -1,17 +1,27 @@
-import struct  # for unpacking floating-point data
+import argparse
 import asyncio
-from typing import Any  # for async BLE IO
-from bleak import BleakScanner, BleakClient  # for BLE communication
+import struct
+import typing
+
+import bleak  # for BLE communication
+
+
+# SECTION: general utility funcitons/classes
+#
+# these are general functions/classes for doing stuff like printing
+# classes, parsing binary, etc.
+
 
 # returns a pretty-printed representation of an arbitrary class
-def _pretty_print(obj : Any) -> str:
+def _pretty_print(obj) -> str:
     return f"{obj.__class__.__name__}({', '.join('%s=%s' % item for item in vars(obj).items())})"
 
 # a helper class that encapsulates a reader "cursor" that indexes a
-# location in an array of bytes. Provides methods for reading multi-byte
-# sequences (floats, ints, etc.) from the array, advancing the cursor as
-# it reads. Multi-byte sequences are parsed according to XSens's binary
-# spec (namely, little-endian with IEE754 floats)
+# location in an array of bytes. 
+# 
+# Provides methods for reading multi-byte sequences (floats, ints, etc.) from the
+# array, advancing the cursor as it reads. Multi-byte sequences are parsed according
+# to XSens's binary spec (little-endian integers, IEE754 floats)
 class _ResponseReader:
 
     # initializes a reader that's pointing to the start of `data`
@@ -50,7 +60,8 @@ class _ResponseReader:
     def read_f32(self) -> float:
         return struct.unpack('f', self.read_bytes(4))
 
-# SERVICES (as defined in the BLE spec)
+
+# SECTION: SERVICES (as defined in the BLE spec)
 #
 # the XSens DOT provides BLE services with the following prefixes on the
 # UUID:
@@ -160,8 +171,6 @@ class DeviceReportCharacteristic:
     # returns a `DeviceReportCharacteristic` read from a `_ResponseReader`
     def _from_reader(reader : _ResponseReader):
         assert reader.remaining() >=  DeviceReportCharacteristic.SIZE
-
-        end = reader.pos + DeviceReportCharacteristic.SIZE
 
         rv = DeviceReportCharacteristic()
         rv.typeid = reader.read_u8()
@@ -826,9 +835,13 @@ class BatteryCharacteristic:
     def __repr__(self):
         return _pretty_print(self)
 
-# a class for connecting to, and using, an XSens DOT
+
+# SECTION: `Dot` context manager
 #
-# This class provides:
+# this is a lifetime wrapper around a BLE connection to a single DOT
+
+
+# The `Dot` class provides:
 #
 # - Methods for connecting to the underlying DOT device through the Bluetooth Low-Energy
 #   (BLE) connection (`Dot.connect`, `Dot.disconnect`, `with`, and `async with`)
@@ -860,7 +873,7 @@ class Dot:
     # (`async with Dot(ble) as dot`) to setup/teardown the connection
     def __init__(self, ble_device):
         self.dev = ble_device
-        self.client = BleakClient(self.dev.address)
+        self.client = bleak.BleakClient(self.dev.address)
 
     # automatically called when entering `async with` blocks
     async def __aenter__(self):
@@ -873,12 +886,13 @@ class Dot:
 
     # automatically called when entering (synchronous) `with` blocks
     def __enter__(self):
-        asyncio.get_event_loop().run_until_complete(self.__aenter__())
+        self.loop = asyncio.new_event_loop()
+        self.loop.run_until_complete(self.__aenter__())
         return self
 
     # automatically called when exiting (synchronous) `with` blocks
     def __exit__(self, exc_type, value, traceback):
-        asyncio.get_event_loop().run_until_complete(self.__aexit__(exc_type, value, traceback))
+        self.loop.run_until_complete(self.__aexit__(exc_type, value, traceback))
 
     # (dis)connection methods
 
@@ -888,7 +902,7 @@ class Dot:
 
     # synchronously establishes a connection to the DOT
     def connect(self):
-        return asyncio.get_event_loop().run_until_complete(self.aconnect())
+        self.loop.run_until_complete(self.aconnect())
 
     # asynchronously terminates the connection to the DOT
     async def adisconnect(self):
@@ -896,7 +910,7 @@ class Dot:
 
     # synchronously terminates the connection to the DOT
     def disconnect(self):
-        return asyncio.get_event_loop().run_until_complete(self.adisconnect())
+        return self.loop.run_until_complete(self.adisconnect())
 
     # low-level characteristic accessors
 
@@ -907,7 +921,7 @@ class Dot:
 
     # synchronously reads the "Device Info Characteristic" (sec. 2.1 in the BLE spec)
     def device_info_read(self):
-        return asyncio.get_event_loop().run_until_complete(self.adevice_info_read())
+        return self.loop.run_until_complete(self.adevice_info_read())
 
     # asynchronously reads the "Device Control Characteristic" (sec. 2.2. in the BLE spec)
     async def adevice_control_read(self):
@@ -916,7 +930,7 @@ class Dot:
 
     # synchronously reads the "Device Control Characteristic" (sec. 2.2. in the BLE spec)
     def device_control_read(self):
-        return asyncio.get_event_loop().run_until_complete(self.adevice_control_read())
+        return self.loop.run_until_complete(self.adevice_control_read())
 
     # asynchronously writes the "Device Control Characteristic" (sec. 2.2. in the BLE spec)
     #
@@ -931,7 +945,7 @@ class Dot:
     # arg must be a `DeviceControlCharacteristic` with its fields set to appropriate
     # values (read the BLE spec to see which values are supported)
     def device_control_write(self, device_control_characteristic : DeviceControlCharacteristic):
-        asyncio.get_event_loop().run_until_complete(self.adevice_control_write(device_control_characteristic))
+        self.loop.run_until_complete(self.adevice_control_write(device_control_characteristic))
 
     # asynchronously enable notifications from the "Device Report Characteristic" (sec.
     # 2.3 in the BLE spec)
@@ -953,7 +967,7 @@ class Dot:
     # a significant event happens (e.g. a button press). See the BLE spec for which
     # events trigger from which actions.
     def device_report_start_notify(self, callback):
-        asyncio.get_event_loop().run_until_complete(self.adevice_report_start_notify(callback))
+        self.loop.run_until_complete(self.adevice_report_start_notify(callback))
 
     # asynchronously disable notifications from the "Device Report Characteristic" (sec.
     # 2.3 in the BLE spec)
@@ -971,7 +985,7 @@ class Dot:
     # method. After this action completes, the `callback` in the enable call will no longer
     # be called
     def device_report_stop_notify(self):
-        asyncio.get_event_loop().run_until_complete(self.adevice_report_stop_notify())
+        self.loop.run_until_complete(self.adevice_report_stop_notify())
 
     # asynchronously read the "Control Characteristic" (sec. 3.1 in the BLE spec)
     async def acontrol_read(self):
@@ -980,7 +994,7 @@ class Dot:
 
     # asynchronously read the "Control Characteristic" (sec. 3.1 in the BLE spec)
     def control_read(self):
-        return asyncio.get_event_loop().run_until_complete(self.acontrol_read())
+        return self.loop.run_until_complete(self.acontrol_read())
 
     # asynchronously write the "Control Characteristic" (sec. 3.1 in the BLE spec)
     async def acontrol_write(self, control_characteristic : ControlCharacteristic):
@@ -989,7 +1003,7 @@ class Dot:
 
     # synchronously write the "Control Characteristic" (sec. 3.1 in the BLE spec)
     def control_write(self, control_characteristic : ControlCharacteristic):
-        asyncio.get_event_loop().run_until_complete(self.acontrol_write(control_characteristic))
+        self.loop.run_until_complete(self.acontrol_write(control_characteristic))
 
     # asynchronously subscribe to long-payload measurement notifications
     async def along_payload_start_notify(self, callback):
@@ -997,37 +1011,37 @@ class Dot:
 
     # synchronously subscribe to long-payload measurement notifications
     def long_payload_start_notify(self, callback):
-        asyncio.get_event_loop().run_until_complete(self.along_payload_start_notify(callback))
+        self.loop.run_until_complete(self.along_payload_start_notify(callback))
 
     async def along_payload_stop_notify(self):
         await self.client.stop_notify(LongPayloadCharacteristic.UUID)
 
     def long_payload_stop_notify(self):
-        asyncio.get_event_loop().run_until_complete(self.along_payload_stop_notify())
+        self.loop.run_until_complete(self.along_payload_stop_notify())
 
     async def amedium_payload_start_notify(self, callback):
         await self.client.start_notify(MediumPayloadCharacteristic.UUID, callback)
 
     def medium_payload_start_notify(self, callback):
-        asyncio.get_event_loop().run_until_complete(self.amedium_payload_start_notify(callback))
+        self.loop.run_until_complete(self.amedium_payload_start_notify(callback))
 
     async def amedium_payload_stop_notify(self):
         await self.client.stop_notify(MediumPayloadCharacteristic.UUID)
 
     def medium_payload_stop_notify(self):
-        asyncio.get_event_loop().run_until_complete(self.amedium_payload_stop_notify())
+        self.loop.run_until_complete(self.amedium_payload_stop_notify())
 
     async def ashort_payload_start_notify(self, callback):
         await self.client.start_notify(ShortPayloadCharacteristic.UUID, callback)
 
     def short_payload_start_notify(self, callback):
-        asyncio.get_event_loop().run_until_complete(self.ashort_payload_start_notify(callback))
+        self.loop.run_until_complete(self.ashort_payload_start_notify(callback))
 
     async def ashort_payload_stop_notify(self):
         await self.client.stop_notify(ShortPayloadCharacteristic.UUID)
 
     def short_payload_stop_notify(self):
-        asyncio.get_event_loop().run_until_complete(self.ashort_payload_stop_notify())
+        self.loop.run_until_complete(self.ashort_payload_stop_notify())
 
     # asynchronously read the "Battery Characteristic" (sec. 4.1 in the BLE spec)
     async def abattery_read(self):
@@ -1036,7 +1050,7 @@ class Dot:
 
     # synchronously read the "Battery Characteristic" (sec. 4.1 in the BLE spec)
     def battery_read(self):
-        return asyncio.get_event_loop().run_until_complete(self.abattery_read())
+        return self.loop.run_until_complete(self.abattery_read())
 
     # asynchronously enable battery notifications from the "Battery Characteristic" (see
     # sec. 4.1 in the BLE spec)
@@ -1046,7 +1060,7 @@ class Dot:
     # synchronously enable battery notifications from the "Battery Characteristic" (see
     # sec. 4.1 in the BLE spec)
     def battery_start_notify(self, callback):
-        asyncio.get_event_loop().run_until_complete(self.abattery_start_notify(callback))
+        self.loop.run_until_complete(self.abattery_start_notify(callback))
 
     # high-level operations
 
@@ -1065,7 +1079,7 @@ class Dot:
     # (from BLE spec sec. 2.2.): The sensor LED will fast blink 8 times and then
     # a short pause in red, lasting for 10 seconds.
     def identify(self):
-        asyncio.get_event_loop().run_until_complete(self.aidentify())
+        self.loop.run_until_complete(self.aidentify())
 
     # asynchronously requests that the DOT powers itself off
     async def apower_off(self):
@@ -1076,7 +1090,7 @@ class Dot:
 
     # synchronously requests that the DOT powers itself off
     def power_off(self):
-        asyncio.get_event_loop().run_until_complete(self.apower_off())
+        self.loop.run_until_complete(self.apower_off())
 
     # asynchronosly requests that the DOT should power itself on when plugged into
     # a USB (e.g. when charging)
@@ -1089,7 +1103,7 @@ class Dot:
     # synchronosly requests that the DOT should power itself on when plugged into
     # a USB (e.g. when charging)
     def enable_power_on_by_usb_plug_in(self):
-        asyncio.get_event_loop().run_until_complete(self.aenable_power_on_by_usb_plug_in())
+        self.loop.run_until_complete(self.aenable_power_on_by_usb_plug_in())
 
     # asynchronously requests that the DOT shouldn't power itself on when plugged into
     # a USB (e.g. when charging)
@@ -1102,7 +1116,7 @@ class Dot:
     # synchronously requests that the DOT shouldn't power itself on when plugged into
     # a USB (e.g. when charging)
     def disable_power_on_by_usb_plug_in(self):
-        asyncio.get_event_loop().run_until_complete(self.adisable_power_on_by_usb_plug_in())
+        self.loop.run_until_complete(self.adisable_power_on_by_usb_plug_in())
 
     # asynchronously sets the output rate of the DOT
     #
@@ -1119,7 +1133,7 @@ class Dot:
     #
     # (BLE spec sec. 2.2): only values 1,4,10,12,15,20,30,60,120hz are permitted
     def set_output_rate(self, rate):
-        asyncio.get_event_loop().run_until_complete(self.aset_output_rate(rate))
+        self.loop.run_until_complete(self.aset_output_rate(rate))
 
     # asynchronously resets the output rate of the DOT to its default value (60 hz)
     async def areset_output_rate(self):
@@ -1127,7 +1141,7 @@ class Dot:
 
     # synchronously resets the output rate of the DOT to its default value (60 hz)
     def reset_output_rate(self):
-        asyncio.get_event_loop().run_until_complete(self.areset_output_rate())
+        self.loop.run_until_complete(self.areset_output_rate())
 
     # asynchronously sets the "Filter Profile Index" field in the Device Control Characteristic
     #
@@ -1146,7 +1160,7 @@ class Dot:
     # this sets how the DOT filters measurements? No idea. See sec. 2.2 in the BLE
     # spec for a slightly better explanation
     def set_filter_profile_index(self, idx):
-        asyncio.get_event_loop().run_until_complete(self.aset_filter_profile_index(idx))
+        self.loop.run_until_complete(self.aset_filter_profile_index(idx))
 
     # asynchronously sets the "Filter Profile Index" of the DOT to "General"
     #
@@ -1160,7 +1174,7 @@ class Dot:
     # (from BLE spec sec. 2.2., table 8): "General" is the "Default for general human
     # motions"
     def set_filter_profile_to_general(self):
-        asyncio.get_event_loop().run_until_complete(self.aset_filter_profile_to_general())
+        self.loop.run_until_complete(self.aset_filter_profile_to_general())
 
     # asynchronously sets the "Filter Profile Index" of the DOT to "Dynamic"
     #
@@ -1174,7 +1188,12 @@ class Dot:
     # (from BLE spec. sec. 2.2., table 8): "Dynamic" is "For fast and jerky human motions
     # like sprinting"
     def set_filter_profile_to_dynamic(self):
-        asyncio.get_event_loop().run_until_complete(self.aset_filter_profile_to_dynamic())
+        self.loop.run_until_complete(self.aset_filter_profile_to_dynamic())
+
+    # sychronously pump this DOT's message loop forever
+    def pump_forever(self):
+        self.loop.pump_forever()
+
 
 # a python `Callable` that is called whenever a notification is
 # received by the bluetooth backend
@@ -1188,10 +1207,17 @@ class ResponseHandler:
         parsed = MediumPayloadCompleteEuler.parse(data)
         print(f"i={self.i} t={parsed.timestamp.value} x={parsed.euler.x}, y={parsed.euler.y}, z={parsed.euler.z}")
 
+
+# SECTION: high-level helper functions
+#
+# these are module-level functions that users can call without having
+# to set up an `xdc.Dot` context etc.
+
+
 # asynchronously returns `True` if the provided `bleak.backends.device.BLEDevice`
 # is believed to be an XSens DOT sensor
-async def ais_DOT(bledevice):
-    if bledevice.name and "xsens dot" in bledevice.name:
+async def ais_DOT(bledevice: bleak.BLEDevice) -> bool:
+    if bledevice.name and "xsens dot" in bledevice.name.lower():
         # spec: 1.2: Scanning and Filtering: tag name is "Xsens DOT"
         #
         # other devices in the wild *may* have a name collision with this, but it's
@@ -1212,55 +1238,59 @@ async def ais_DOT(bledevice):
 
 # synchronously returns `True` if the provided `bleak.backends.device.BLEDevice` is an
 # XSens DOT
-def is_DOT(bledevice):
-    return asyncio.get_event_loop().run_until_complete(ais_DOT(bledevice))
+def is_DOT(bledevice: bleak.BLEDevice) -> bool:
+    loop = asyncio.new_event_loop()
+    return loop.run_until_complete(ais_DOT(bledevice))
 
 # asynchronously returns a list of all (not just DOT) BLE devices that
 # the host's bluetooth adaptor can see. Each element in the list is an
 # instance of `bleak.backends.device.BLEDevice`
-async def ascan_all():
-    async with BleakScanner() as scanner:
-        return list(await scanner.discover())
+async def ascan_all(timeout: float = 5.0) -> list[bleak.BLEDevice]:
+    async with bleak.BleakScanner() as scanner:
+        return list(await scanner.discover(timeout=timeout))
 
 # synchronously returns a list of all (not just DOT) BLE devices that the
 # host's bluetooth adaptor can see. Each element in the list is an instance
 # of `bleak.backends.device.BLEDevice`
-def scan_all():
-    return asyncio.get_event_loop().run_until_complete(ascan_all())
+def scan_all(timeout: float = 5.0) -> list[bleak.BLEDevice]:
+    loop = asyncio.new_event_loop()
+    return loop.run_until_complete(ascan_all(timeout))
 
 # asynchronously returns a list of all XSens DOTs that the host's bluetooth
 # adaptor can see. Each element in the list is an instance of
 # `bleak.backends.device.BLEDevice`
-async def ascan():
-    return [d for d in await ascan_all() if await ais_DOT(d)]
+async def ascan(timeout: float = 5.0) -> list[bleak.BLEDevice]:
+    return [d for d in await ascan_all(timeout) if await ais_DOT(d)]
 
 # synchronously returns a list of all XSens DOTs that the host's bluetooth
 # adaptor can see. Each element in the list is an instance of
 # `bleak.backends.device.BLEDevice`
-def scan():
-    return asyncio.get_event_loop().run_until_complete(ascan())
+def scan(timeout: float = 5.0) -> list[bleak.BLEDevice]:
+    loop = asyncio.new_event_loop()
+    return loop.run_until_complete(ascan(timeout))
 
 # asynchronously returns a BLE device with the given identifier/address
 #
 # returns `None` if the device cannot be found (e.g. no connection, wrong
 # address)
-async def afind_by_address(device_identifier):
-    async with BleakScanner() as scanner:
-        return await scanner.find_device_by_address(device_identifier)
+async def afind_by_address(device_identifier: str) -> typing.Optional[bleak.BLEDevice]:
+    async with bleak.BleakScanner() as scanner:
+        return await scanner.find_device_by_address(device_identifier, timeout=40)
 
 # synchronously returns a BLE device with the given identifier/address
 #
 # returns `None` if the device cannot be found (e.g. no connection, wrong
 # address)
-def find_by_address(device_identifier):
-    return asyncio.get_event_loop().run_until_complete(afind_by_address(device_identifier))
+def find_by_address(device_identifier: str) -> typing.Optional[bleak.BLEDevice]:
+    loop = asyncio.new_event_loop()
+    return loop.run_until_complete(afind_by_address(device_identifier))
 
 # asynchronously returns a BLE device with the given identifier/address if the
 # device appears to be an XSens DOT
 #
 # effectively, the same as `afind_by_address` but with the extra stipulation that
 # the given device must be a DOT
-async def afind_dot_by_address(device_identifier):
+async def afind_dot_by_address(device_identifier: str) -> typing.Optional[bleak.BLEDevice]:
     dev = await afind_by_address(device_identifier)
 
     if dev is None:
@@ -1275,8 +1305,9 @@ async def afind_dot_by_address(device_identifier):
 #
 # effectively, the same as `find_by_address`, but with the extra stipulation that
 # the given device must be a DOT
-def find_dot_by_address(device_identifier):
-    return asyncio.get_event_loop().run_until_complete(afind_dot_by_address(device_identifier))
+def find_dot_by_address(device_identifier: str) -> typing.Optional[bleak.BLEDevice]:
+    loop = asyncio.new_event_loop()
+    return loop.run_until_complete(afind_dot_by_address(device_identifier))
 
 
 # low-level characteristic accessors (free functions)
@@ -1285,88 +1316,128 @@ def find_dot_by_address(device_identifier):
 # asynchronously returns the "Device Info Characteristic" for the given DOT device
 #
 # see: sec 2.1 Device Info Characteristic in DOT BLE spec
-async def adevice_info_read(bledevice):
+async def adevice_info_read(bledevice: bleak.BLEDevice) -> DeviceInfoCharacteristic:
     async with Dot(bledevice) as dot:
         return await dot.adevice_info_read()
 
 # synchronously returns the "Device Info Characteristic" for the given DOT device
 #
 # see: sec 2.1: Device Info Characteristic in DOT BLE spec
-def device_info_read(bledevice):
-    return asyncio.get_event_loop().run_until_complete(adevice_info_read(bledevice))
+def device_info_read(bledevice: bleak.BLEDevice) -> DeviceInfoCharacteristic:
+    loop = asyncio.new_event_loop()
+    return loop.run_until_complete(adevice_info_read(bledevice))
 
 # asynchronously returns the "Device Control Characteristic" for the given DOT device
 #
 # see: sec 2.2: Device Control Characteristic in DOT BLE spec
-async def adevice_control_read(bledevice):
+async def adevice_control_read(bledevice: bleak.BLEDevice) -> DeviceControlCharacteristic:
     async with Dot(bledevice) as dot:
         return await dot.adevice_control_read()
 
 # synchronously returns the "Device Control Characteristic" for the given DOT device
 #
 # see: sec 2.2: Device Control Characteristic in DOT BLE spec
-def device_control_read(bledevice):
-    return asyncio.get_event_loop().run_until_complete(adevice_control_read(bledevice))
+def device_control_read(bledevice: bleak.BLEDevice) -> DeviceControlCharacteristic:
+    loop = asyncio.new_event_loop()
+    return loop.run_until_complete(adevice_control_read(bledevice))
 
 # asynchronously write the provided DeviceControlCharacteristic to the provided
 # DOT device
-async def adevice_control_write(bledevice, device_control_characteristic):
+async def adevice_control_write(bledevice: bleak.BLEDevice, device_control_characteristic: DeviceControlCharacteristic):
     async with Dot(bledevice) as dot:
         await dot.adevice_control_write(device_control_characteristic)
 
-def device_control_write(bledevice, device_control_characteristic):
-    asyncio.get_event_loop().run_until_complete(adevice_control_write(bledevice, device_control_characteristic))
+def device_control_write(bledevice: bleak.BLEDevice, device_control_characteristic: DeviceControlCharacteristic):
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(adevice_control_write(bledevice, device_control_characteristic))
 
 # high-level operations (free functions)
 
-async def aidentify(bledevice):
+async def aidentify(bledevice: bleak.BLEDevice):
     async with Dot(bledevice) as dot:
         await dot.aidentify()
 
-def identify(bledevice):
-    asyncio.get_event_loop().run_until_complete(aidentify(bledevice))
+def identify(bledevice: bleak.BLEDevice):
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(aidentify(bledevice))
 
 async def apower_off(bledevice):
     async with Dot(bledevice) as dot:
         await dot.apower_off()
 
-def power_off(bledevice):
-    asyncio.get_event_loop().run_until_complete(apower_off(bledevice))
+def power_off(bledevice: bleak.BLEDevice):
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(apower_off(bledevice))
 
-async def aenable_power_on_by_usb_plug_in(bledevice):
+async def aenable_power_on_by_usb_plug_in(bledevice: bleak.BLEDevice):
     async with Dot(bledevice) as dot:
         await dot.aenable_power_on_by_usb_plug_in()
 
-def enable_power_on_by_usb_plug_in(bledevice):
-    asyncio.get_event_loop().run_until_complete(aenable_power_on_by_usb_plug_in(bledevice))
+def enable_power_on_by_usb_plug_in(bledevice: bleak.BLEDevice):
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(aenable_power_on_by_usb_plug_in(bledevice))
 
-async def adisable_power_on_by_usb_plug_in(bledevice):
+async def adisable_power_on_by_usb_plug_in(bledevice: bleak.BLEDevice):
     async with Dot(bledevice) as dot:
         await dot.adisable_power_on_by_usb_plug_in()
 
-def disable_power_on_by_usb_plug_in(bledevice):
-    asyncio.get_event_loop().run_until_complete(adisable_power_on_by_usb_plug_in(bledevice))
+def disable_power_on_by_usb_plug_in(bledevice: bleak.BLEDevice):
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(adisable_power_on_by_usb_plug_in(bledevice))
 
-async def aset_output_rate(bledevice, rate):
+async def aset_output_rate(bledevice: bleak.BLEDevice, rate: int):
     async with Dot(bledevice) as dot:
         await dot.aset_output_rate(rate)
 
-def set_output_rate(bledevice, rate):
-    asyncio.get_event_loop().run_until_complete(aset_output_rate(bledevice, rate))
+def set_output_rate(bledevice: bleak.BLEDevice, rate: int):
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(aset_output_rate(bledevice, rate))
 
-async def areset_output_rate(bledevice):
+async def areset_output_rate(bledevice: bleak.BLEDevice):
     async with Dot(bledevice) as dot:
         await dot.areset_output_rate()
 
-def reset_output_rate(bledevice):
-    asyncio.get_event_loop().run_until_complete(areset_output_rate(bledevice))
+def reset_output_rate(bledevice: bleak.BLEDevice):
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(areset_output_rate(bledevice))
 
-async def aset_filter_profile_index(bledevice, idx):
+async def aset_filter_profile_index(bledevice: bleak.BLEDevice, idx: int):
     async with Dot(bledevice) as dot:
         await dot.aset_filter_profile_index(idx)
 
-def set_filter_profile_index(bledevice, idx):
-    asyncio.get_event_loop().run_until_complete(aset_filter_profile_index(bledevice, idx))
+def set_filter_profile_index(bledevice: bleak.BLEDevice, idx: int):
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(aset_filter_profile_index(bledevice, idx))
 
-def pump():
-    asyncio.get_event_loop().run_forever()
+
+# SECTION: CLI API
+#
+# wraps various API calls with a command-line client
+
+def main():
+    parser = argparse.ArgumentParser(description="Command line API for the XDC library")
+    subparsers = parser.add_subparsers(dest='command')
+    subparsers.add_parser("scan", description="scan for DOTs and print their address + name")
+    subparsers.add_parser("scan_all", description="scan for all visible BLE devices and print their address + name")
+    identify_parser = subparsers.add_parser("identify", description="identify the dot with the given address")
+    identify_parser.add_argument("address")
+    args = parser.parse_args()
+
+    if args.command == "scan":
+        for dot in scan(20.0):
+            print(f"{dot.address} {dot.name}")
+    elif args.command == "scan_all":
+        for dot in scan_all(20.0):
+            print(f"{dot.address} {dot.name}")
+    elif args.command == "identify":
+        print("find")
+        maybe_device = find_by_address(args.address)
+        if maybe_device:
+            print("identify")
+            identify(maybe_device)
+        else:
+            raise RuntimeError(f"No device with address {args.address} found - you can maybe try with a longer --timeout arg?")
+
+
+if __name__ == '__main__':
+    main()

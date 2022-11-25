@@ -156,7 +156,7 @@ with xdc.Dot(dot) as device:
     # this is required, because the main thread is responsible for pumping the
     # message queue that contains the above notifications. If you don't pump
     # the queue then you won't see the notifications
-    xdc.pump()
+    device.pump_forever()
 
 
 ## ASYNCHRONOUS API (this is actually how communication with the `bleak` backend actually works)
@@ -187,7 +187,7 @@ async def arun():
 # start running the async task from the calling thread (by making the calling thread fully
 # pump the event loop until the task is complete)
 
-loop = asyncio.get_event_loop()
+loop = asyncio.new_event_loop()
 loop.run_until_complete(run())
 ```
 
