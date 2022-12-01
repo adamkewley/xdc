@@ -1192,7 +1192,7 @@ class Dot:
 
     # sychronously pump this DOT's message loop forever
     def pump_forever(self):
-        self.loop.pump_forever()
+        self.loop.run_forever()
 
 
 # a python `Callable` that is called whenever a notification is
@@ -1424,16 +1424,14 @@ def main():
     args = parser.parse_args()
 
     if args.command == "scan":
-        for dot in scan(20.0):
+        for dot in scan():
             print(f"{dot.address} {dot.name}")
     elif args.command == "scan_all":
-        for dot in scan_all(20.0):
-            print(f"{dot.address} {dot.name}")
+        for ble_device in scan_all():
+            print(f"{ble_device.address} {ble_device.name}")
     elif args.command == "identify":
-        print("find")
         maybe_device = find_by_address(args.address)
         if maybe_device:
-            print("identify")
             identify(maybe_device)
         else:
             raise RuntimeError(f"No device with address {args.address} found - you can maybe try with a longer --timeout arg?")
