@@ -188,7 +188,7 @@ async def arun():
 # pump the event loop until the task is complete)
 
 loop = asyncio.new_event_loop()
-loop.run_until_complete(run())
+loop.run_until_complete(arun())
 ```
 
 ## General Tips & Tricks
