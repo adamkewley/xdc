@@ -27,10 +27,9 @@ wrote these bindings.
 pip3 install -r requirements.txt
 ```
 
-## Example Usage
+## API Usage Examples
 
 ```python
-import asyncio
 import xdc
 
 # xdc code here, e.g.:
@@ -79,31 +78,45 @@ xdc.device_info_read(dot)
 # returns `xdc.DeviceControlCharacteristic`
 control_chr = xdc.device_control_read(dot)
 
-control_chr.output_rate = 4  # modify it
+# (example of modifying a characteristic before sending the
+# modification to the DOT)
+control_chr.output_rate = 4
 
 # write a (potentially, modified) `xdc.DeviceControlCharacteristic` to
-# the DOT. This enables controlling the device
+# the DOT. This is how you control the device
 xdc.device_control_write(dot, control_chr)
 
 
-## HIGH-LEVEL CONVENIENCE API (see source code for implementation details) ##
+# !!! HIGH-LEVEL CONVENIENCE API !!!
+#
+# this API is easy to use, but slow: it requires setting up and
+# tearing down a new BLE connection every time a method is called
+#
+# see: `with xdc.Dot(...)` context manager, and `async` examples
+# below if you need higher performance
 
 # make the DOT flash its LED light a little bit, so that you can identify it
 xdc.identify(dot)
 
-# turn the DOT off (requires maybe pressing the button or shaking it afterwards to turn it back on)
+# turn the DOT off
+#
+# turn it back on by pressing the DOT's button or shaking it
 xdc.power_off(dot)
 
 # enable powering the DOT on whenever the micro-USB charger is plugged in
+#
+# (handy for development)
 xdc.enable_power_on_by_usb_plug_in(dot)
 
-# (opposite of the above): disable powering the DOT on whenever the micro-USB charger is plugged in
+# disable powering the DOT on whenever the micro-USB charger is plugged in
+#
+# (opposite of the above)
 xdc.disable_power_on_by_usb_plug_in(dot)
 
 # set the output rate of the DOT
 #
-# this is the frequency at which the reporting characteristic (i.e. the thing that is emitted whenever
-# the DOT reports telemetry) reports
+# this is the frequency at which the reporting characteristic (i.e. the
+# thing that is emitted whenever the DOT reports telemetry) reports
 #
 # must be 1, 4, 10, 12, 15, 20, 30, 60, 120 (see official XSens spec: Device Control Characteristic)
 xdc.set_output_rate(dot, 10)
@@ -119,26 +132,49 @@ xdc.reset_output_rate(dot)
 # Robust downstream code should assume that notifications sometimes go missing (e.g. due to
 # connection issues)
 
-# a callback function that is called whenever the DOT sends a device report notification
+# e.g. #1: create a function that is called whenever the computer receives a device
+#          report notification from the DOT
 #
-# after using `device_report_start_notify`, this will be called by the backend - the caller
-# should handle the message bytes as appropriate (e.g. by pumping them into a parser)
+#          - after giving this function to `device_report_start_notify`, it will be
+#            called by the backend
+#
+#          - the callee (i.e. this function) should handle the message bytes as
+#            appropriate (e.g. by pumping them into a parser)
+#
 def on_device_report(message_id, message_bytes):
+    # parse the message bytes as a characteristic
     parsed = xdc.DeviceReportCharacteristic.from_bytes(message_bytes)
     print(parsed)
 
-# a callback function that is called whenever the DOT sends a long payload report notifcation
+# e.g. #2 create a function that is called whenever the computer receives a long
+#         payload report from the DOT
 #
-# after using `device
+#         - same as above, but for a different payload message type (see the XSens
+#           BLE specification for specifics)
 def on_long_payload_report(message_id, message_bytes):
     print(message_bytes)
 
+# e.g. #3 create a function that is called whenever the computer receives a medium
+#         payload report from the DOT
+#
+#         - same as above, but for a different payload message type (see the XSens
+#           BLE specification for specifics)
 def on_medium_payload_report(message_id, message_bytes):
     print(message_bytes)
 
+# e.g. #4 create a function that is called whenever the computer receives a short
+#         payload report from the DOT
+#
+#         - same as above, but for a different payload message type (see the XSens
+#           BLE specification for specifics)
 def on_short_payload_report(message_id, message_bytes):
     print(message_bytes)
 
+# e.g. #5 create a function that is called whenever the computer receives a battery
+#         report from the DOT
+#
+#         - same as above, but for a different payload message type (see the XSens
+#           BLE specification for specifics)
 def on_battery_report(message_id, message_bytes):
     print(message_bytes)
 
@@ -187,6 +223,7 @@ async def arun():
 # start running the async task from the calling thread (by making the calling thread fully
 # pump the event loop until the task is complete)
 
+import asyncio
 loop = asyncio.new_event_loop()
 loop.run_until_complete(arun())
 ```
